@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"=== ktomo-ws ===\"; echo \"SSD: $(df -h /home 2>/dev/null | tail -1 | awk '{print $4}')\"; echo \"NAS: $(df -h /mnt/nas 2>/dev/null | tail -1 | awk '{print $4}' || echo 'not mounted')\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "セッション終了処理を行ってください。2つのタスクを実行:\n\n1. **ラボノート生成**: logs/lab_notebook_$(date +%Y%m%d_%H%M%S).md に書き出す。内容: (1) 日付 (2) 解析の目的 (3) 実行した内容の要約 (4) 主要な結果・数値 (5) 生成したファイル一覧 (6) 未解決事項。\n\n2. **アーカイブ整理**: results/ 内の各サブディレクトリで、同一prefixで複数タイムスタンプがあるファイルを検出し、最新版のみ残して古い版を archive/{ディレクトリ名}_{現在時刻}/ に移動する。scripts/ 内も同様に旧版があればarchiveに移動する。移動したファイル一覧をラボノートに追記する。",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "enabledPlugins": {
+    "pubmed@life-sciences": true,
+    "commit-commands@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "scientific-skills@claude-scientific-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "life-sciences": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/life-sciences.git"
+      }
+    },
+    "matsengrp-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "matsengrp/plugins"
+      }
+    },
+    "claude-scientific-skills": {
+      "source": {
+        "source": "github",
+        "repo": "K-Dense-AI/claude-scientific-skills"
+      }
+    }
+  }
+}
