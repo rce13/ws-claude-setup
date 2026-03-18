@@ -1,0 +1,40 @@
+# 大容量バイナリ
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.bai
+*.sam
+*.cram
+*.sra
+*.bcf
+*.vcf.gz
+
+# 参照ゲノム・インデックス
+*.fa
+*.fasta
+*.fai
+*.bt2
+*.nhr
+*.nin
+*.nsq
+*.pdb
+
+# 中間・キャッシュ
+*.tmp
+*.temp
+*.pyc
+__pycache__/
+
+# conda/仮想環境
+.conda/
+.venv/
+envs/
+
+# NAS（巨大）
+/mnt/nas/
+
+# システム
+.git/
+node_modules/

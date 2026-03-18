@@ -1,0 +1,35 @@
+{
+  "enabledPlugins": {
+    "pubmed@life-sciences": true
+  },
+  "extraKnownMarketplaces": {
+    "life-sciences": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/life-sciences.git"
+      }
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"=== ktomo-ws ===\"; echo \"SSD: $(df -h /home 2>/dev/null | tail -1 | awk '{print $4}')\"; echo \"NAS: $(df -h /mnt/nas 2>/dev/null | tail -1 | awk '{print $4}' || echo 'not mounted')\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '💡 /lab-notebook を実行しましたか？'"
+          }
+        ]
+      }
+    ]
+  }
+}
