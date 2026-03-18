@@ -1,15 +1,4 @@
 {
-  "enabledPlugins": {
-    "pubmed@life-sciences": true
-  },
-  "extraKnownMarketplaces": {
-    "life-sciences": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/anthropics/life-sciences.git"
-      }
-    }
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -31,5 +20,31 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "pubmed@life-sciences": true,
+    "commit-commands@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "scientific-skills@claude-scientific-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "life-sciences": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/life-sciences.git"
+      }
+    },
+    "matsengrp-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "matsengrp/plugins"
+      }
+    },
+    "claude-scientific-skills": {
+      "source": {
+        "source": "github",
+        "repo": "K-Dense-AI/claude-scientific-skills"
+      }
+    }
   }
 }
