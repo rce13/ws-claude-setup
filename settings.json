@@ -1,4 +1,8 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "GH_TOKEN": "REDACTED"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -34,15 +38,16 @@
       }
     ]
   },
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "GH_TOKEN": "REDACTED"
-  },
   "enabledPlugins": {
     "pubmed@life-sciences": true,
     "commit-commands@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
-    "scientific-skills@claude-scientific-skills": true
+    "scientific-skills@claude-scientific-skills": true,
+    "discord@claude-plugins-official": true
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 /home/ytongu/.claude/statusline.py"
   },
   "extraKnownMarketplaces": {
     "life-sciences": {
