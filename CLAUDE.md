@@ -5,7 +5,7 @@ ktomo-ws: Xeon6 48C/96T, 512GB RAM, RTX 5090, Ubuntu 24.04, CUDA 13.0
 管理者: 頓宮Josh(ytongu) / 利用者: 笠原Susie(ktomo)
 
 ## 絶対ルール
-- 共通conda環境(bioinfo, umi_env, nanopore, rstudio, singlecell, boltz2, brpro, tage)を変更しない
+- 共通conda環境(bioinfo, umi_env, nanopore, rstudio, singlecell, boltz2, brpro, tage, evo2)を変更しない
 - SSD容量を常に意識する。大容量データは作業中のみSSDに置く
 - 長時間解析は必ずtmux内で実行する
 
