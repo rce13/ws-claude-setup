@@ -41,6 +41,12 @@ archive/
 │   └── 10_final_figures_v1.py                  (旧版スクリプト)
 ```
 
+## 自作ツール
+
+### gse2tage (~/tools/gse2tage/)
+GEO accession → tAge自動パイプライン。`gse2tage GSE123456 --species mouse` で全モデル実行。
+詳細: `~/tools/gse2tage/README.md`
+
 ## conda
 試したいツール → `conda create -n my_test python=3.11`（使用後は削除）
 
