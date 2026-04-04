@@ -38,16 +38,16 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 /home/ytongu/.claude/statusline.py"
+  },
   "enabledPlugins": {
     "pubmed@life-sciences": true,
     "commit-commands@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
     "scientific-skills@claude-scientific-skills": true,
     "discord@claude-plugins-official": true
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "python3 /home/ytongu/.claude/statusline.py"
   },
   "extraKnownMarketplaces": {
     "life-sciences": {
@@ -66,6 +66,12 @@
       "source": {
         "source": "github",
         "repo": "K-Dense-AI/claude-scientific-skills"
+      }
+    },
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
       }
     }
   }

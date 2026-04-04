@@ -8,6 +8,13 @@ ktomo-ws: Xeon6 48C/96T, 512GB RAM, RTX 5090, Ubuntu 24.04, CUDA 13.0
 - 共通conda環境(bioinfo, umi_env, nanopore, rstudio, singlecell, boltz2, brpro, tage, evo2)を変更しない
 - SSD容量を常に意識する。大容量データは作業中のみSSDに置く
 - 長時間解析は必ずtmux内で実行する
+- **サーバーリソース保護（最重要）**: 重い処理の同時実行でOOM/I/O飽和→サーバーダウンを絶対に防ぐ
+  - **起動前に必ず確認**: `free -h` と `top -bn1 | head -5` でメモリ・CPU負荷を確認してから新しい重い処理を開始する
+  - **同時実行上限**: 重い処理（STAR index/mapping, SCAFE Docker, CellRanger, 大規模rsync）は**最大2つまで同時実行**。3つ目を起動する前に既存の負荷が下がるのを待つ
+  - **STARのスレッド数制限**: 他の重い処理と並列時は `--runThreadN 16` 以下に制限する（単独時は32可）
+  - **Docker並列数**: SCAFE等のDocker処理は他の重い処理と同時実行時は`MAX_PARALLEL=2`に下げる
+  - **NAS I/O競合**: NASからの大量読み込み（FASTQ読み込み、BAM rsync）は同時2ストリーム以下に制限する
+  - **メモリ安全マージン**: 空きメモリが64GB未満の場合、新しい重い処理を起動しない
 
 ## 出力ルール
 - 全産物にタイムスタンプ: `TS=$(date +%Y%m%d_%H%M%S)`
@@ -40,6 +47,12 @@ archive/
 ├── scripts_20260318_180000/
 │   └── 10_final_figures_v1.py                  (旧版スクリプト)
 ```
+
+## 自作ツール
+
+### gse2tage (~/tools/gse2tage/)
+GEO accession → tAge自動パイプライン。`gse2tage GSE123456 --species mouse` で全モデル実行。
+詳細: `~/tools/gse2tage/README.md`
 
 ## conda
 試したいツール → `conda create -n my_test python=3.11`（使用後は削除）
