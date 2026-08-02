@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "バリュー修正狙い: 『今の配当が高い会社』ではなく『還元余地が大きくて放置されている会社』を拾う。",
+    "狙いは配当と値上がりの両取り。PBR1倍割れの是正は東証が資本コスト改善を要請して以降、",
+    "自社株買い・増配・政策保有株売却の発表が株価再評価の引き金になってきた実績のあるテーマ。",
+    "payout_ratio の上限を低めに置いているのが要点 — 配当性向が低いほど増配余地が残っている。",
+    "高配当スクリーニングと逆方向のフィルタなので、income.json とは結果が大きく変わる。"
+  ],
+  "pool_metrics": ["fcf_yield", "equity_ratio", "roe"],
+  "pool_limit": 500,
+  "pool_mode": "intersect",
+  "max_verify": 60,
+  "thresholds": {
+    "pbr": [null, 1.0],
+    "equity_ratio": [50.0, null],
+    "roe": [8.0, null],
+    "payout_ratio": [null, 40.0],
+    "fcf_yield": [5.0, null],
+    "dividend_yield": [1.0, null],
+    "de_ratio": [null, 0.5]
+  }
+}

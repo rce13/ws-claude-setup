@@ -1,6 +1,7 @@
 # 日本株スクリーニング（優待込み）
 
-財務スクリーニング → 優待突き合わせ → 税引後総合利回りで順位づけ、までの再現可能なパイプライン。
+財務スクリーニング → 優待突き合わせ → 税引後総合利回りで順位づけ → 過去半年リターンの検証、
+までの再現可能なパイプライン。
 
 データ源とその制約は [`docs/jp-stock-data-sources.md`](../../docs/jp-stock-data-sources.md) を参照。
 
@@ -36,31 +37,47 @@ python 02_total_yield.py \
   --price-asof 2026-05-10
 ```
 
-## 条件のカスタマイズ
-
-`01_screen_fundamentals.py` の `DEFAULT_CRITERIA` を JSON で上書きできる。
-
 ```bash
-cat > my_criteria.json <<'EOF'
-{
-  "pool_metrics": ["dividend_yield", "roe", "equity_ratio"],
-  "pool_limit": 300,
-  "pool_mode": "intersect",
-  "max_verify": 60,
-  "thresholds": {
-    "roe":            [10.0, null],
-    "equity_ratio":   [50.0, null],
-    "pbr":            [null, 1.5],
-    "dividend_yield": [2.5, null],
-    "payout_ratio":   [null, 70.0]
-  }
-}
-EOF
-python 01_screen_fundamentals.py --config my_criteria.json --outdir $PROJ/results/01_screen
+# 5. その銘柄群が過去に半年でどう動いたかを検証する
+python 03_backtest.py \
+  --candidates $PROJ/results/01_screen/candidates_YYYYMMDD_HHMMSS.csv \
+  --outdir $PROJ/results/03_backtest --hold-days 126 --target 10.0
 ```
 
-条件は `screen_log_{TS}.json` に丸ごと保存される。半年後に
-「あのとき何を根拠に選んだのか」を再現できるのがこの形にしている理由。
+## 条件プリセット
+
+`criteria/` に2本用意してある。**狙いが逆方向なので結果は大きく変わる。**
+
+| プリセット | 狙い | 性格 |
+|---|---|---|
+| `income.json` | 今すでに配当利回りが高く、持続性のある会社 | 値動きは小さい方向。半年での値上がりは期待しにくい |
+| `value_rerating.json` | 還元余地が大きくて放置されている会社 | 配当と値上がりの両取り狙い。PBR1倍割れ是正がカタリスト |
+
+```bash
+python 01_screen_fundamentals.py --config criteria/value_rerating.json \
+  --outdir $PROJ/results/01_screen
+```
+
+`value_rerating` の要点は **`payout_ratio` の上限を低く置いていること**。
+配当性向が低いほど増配余地が残っている、という向きのフィルタなので、
+高配当スクリーニングとは逆を向いている。東証が資本コスト改善を要請して以降、
+自社株買い・増配・政策保有株売却の発表が株価再評価の引き金になってきた
+テーマに沿った条件にしてある。
+
+自分で書く場合も同じ形式。`DEFAULT_CRITERIA` を JSON で上書きする。
+条件は `screen_log_{TS}.json` に丸ごと保存されるので、半年後に
+「あのとき何を根拠に選んだのか」を再現できる。
+
+## 半年で+10% という目標について
+
+配当利回り3〜4%は**年間**の数字なので、半年なら1.5〜2%、優待込み税引後でも3%程度。
++10%を狙うなら**残り7〜8ptは値上がりで取るしかない**。つまりインカム系の
+スクリーニングだけでは構造的に届かない。`value_rerating.json` を用意したのはそのため。
+
+そして半年という期間では、財務の良し悪しより相場全体の動き・需給・金利の寄与が
+支配的になる。だから `03_backtest.py` は必ず **TOPIX と並べて出す**。
+銘柄群の中央値が TOPIX とほとんど変わらないなら、それは選別が効いていないという
+陰性の結果であって、条件を作り直す根拠になる。
 
 ## API 消費について
 
@@ -135,3 +152,21 @@ EDINET DB 無料枠は **100 req/日**。消費内訳は:
 | `total_yield_{TS}.csv` | 単元別の全パターン |
 | `best_tier_{TS}.csv` | 各社の最適単元を税引後利回り順で |
 | `total_yield_{TS}.md` | 読み物としての要約（乖離の大きい銘柄、長期条件つき銘柄を別掲） |
+| `backtest_returns_{TS}.csv` | 銘柄×エントリー日ごとの半年後リターン |
+| `backtest_by_stock_{TS}.csv` | 銘柄別の中央値・目標達成率・最悪値 |
+| `backtest_summary_{TS}.md` | 分布・勝率・+10%達成率・TOPIX比較 |
+
+## バックテストのバイアス（読む前に必ず）
+
+`03_backtest.py` が出す数字は予測ではない。以下3つのバイアスが乗っている。
+
+1. **ルックアヘッド** — 「今の財務」で選んだ銘柄に「過去の株価」を当てている。
+   2年前にこの銘柄群を選べたわけではない。戦略の検証ではなく
+   「この条件で選ばれる銘柄群の性質」を見ているだけ。
+2. **生存者バイアス** — 現在上場している銘柄しか見ていない。消えた銘柄が
+   入らない分、リターンは実態より良く出る。
+3. **サンプル数** — 過去2年で半年保有なら、重複しない期間は実質3〜4区間。
+   観測件数が多く見えても独立ではない。中央値の±数ptは誤差。
+
+なお **J-Quants 無料プランの12週間遅延は、バックテストでは一切問題にならない。**
+過去の話だからである。無料枠（過去2年・12週遅延）はまさにこの用途に噛み合っている。

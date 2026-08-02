@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "インカム重視: 今すでに配当利回りが高く、かつ持続性がある会社を拾う。",
+    "payout_ratio の上限は『無理して配っていないか』の確認。80%を超える高配当は",
+    "減益局面で減配に転じやすく、減配は株価下落と同時に来るので二重に効く。",
+    "値動きは相対的に小さくなる方向のフィルタ — 半年での値上がりは期待しにくい。"
+  ],
+  "pool_metrics": ["dividend_yield", "roe", "equity_ratio"],
+  "pool_limit": 300,
+  "pool_mode": "intersect",
+  "max_verify": 60,
+  "thresholds": {
+    "roe": [8.0, null],
+    "equity_ratio": [40.0, null],
+    "pbr": [null, 2.0],
+    "per": [null, 25.0],
+    "dividend_yield": [3.0, null],
+    "payout_ratio": [null, 80.0]
+  }
+}
