@@ -1,0 +1,13 @@
+code,name,tier_shares,yutai_value_yen,yutai_type,times_per_year,utility_factor,record_months,long_hold_months,source_url,note
+# --- 以下は書式サンプル (実在企業ではない)。実データは各社IRで確認して置き換えること ---
+# tier_shares      : その優待を受けるのに必要な株数。同一社で 100/300/1000 と行を分ける
+# yutai_value_yen  : 1回あたりの額面価値 (円)
+# yutai_type       : quo | gift_card | own_product | catalog | discount_coupon | food_voucher
+# times_per_year   : 年間の受領回数 (年1回=1, 年2回=2)
+# utility_factor   : 実効価値係数 0.0-1.0。額面のうち自分にとって実際に価値がある割合
+# record_months    : 権利確定月。複数ある場合は ; 区切り (例 "3;9")
+# long_hold_months : 長期保有条件 (月)。無条件なら 0
+# source_url       : 確認した一次情報のURL (各社IRの優待ページ)
+9999,サンプル商事,100,3000,quo,1,1.0,3,0,https://example.com/ir/yutai,記入例
+9999,サンプル商事,300,5000,quo,1,1.0,3,0,https://example.com/ir/yutai,記入例:単元を増やすと還元率は落ちる
+9998,サンプル食品,100,6000,food_voucher,2,0.6,3;9,12,https://example.com/ir/yutai,記入例:店舗が近くにない前提で係数0.6
