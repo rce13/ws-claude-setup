@@ -1,31 +1,51 @@
 #!/usr/bin/env python3
 """
-目的: EDINET DB API で日本株の財務スクリーニングを行い、優待検討の候補を数十社に絞る。
+目的: EDINET DB のランキング API を組み合わせて日本株を絞り込む。
 
 入力:
   - 環境変数 EDINETDB_API_KEY
-  - --config で指定する JSON (省略時は下の DEFAULT_CRITERIA)
+  - --config で指定する JSON (criteria/ にプリセットあり)
 
 出力:
-  - {outdir}/candidates_{TS}.csv   絞り込み後の候補銘柄と財務指標
-  - {outdir}/screen_log_{TS}.json  使用した条件・API消費数・除外理由の内訳
-  - cache/                          API レスポンスキャッシュ (再実行で消費ゼロ)
+  - {outdir}/candidates_{TS}.csv   通過銘柄と各指標の値
+  - {outdir}/screen_log_{TS}.json  条件・API消費数・各ランキングの値域・注意事項
 
-注意:
-  EDINET DB 無料プランは 100 リクエスト/日。全銘柄ループは不可能なので
-  「rankings で粗く絞る → 生き残りにだけ ratios を叩く」という二段構えにしてある。
-  キャッシュを消すと消費し直しになるので注意。
+★ API 仕様（2026-08 に実データで確認済み）
+
+  GET /v1/rankings/{metric}?limit=N
+    - metric は **ハイフン区切り** (equity-ratio であって equity_ratio ではない)
+    - **limit は最大 500**。それ以上を指定しても 500 件で頭打ち
+    - **指標ごとに「良い順」でソート済み**。ただし何が「良い」かは API 側の定義:
+        pbr              → 低い順  (0.195 → 0.595)
+        roe              → 高い順  (92.2% → 18.5%)
+        shares-change-5y → 減少幅が大きい順 (-99.8% → -6.2%)  ＝自社株買い検出に使える
+        payout-ratio     → **高い順** (200% → 60.6%)
+        ここが罠で、payout-ratio は「配当性向が高い順」なので
+        「増配余地のある低配当性向の会社」を探す用途には**使えない**。
+    - 返る値は人間スケール (% は %、PBR は倍)
+    - 1リクエストで最大500銘柄ぶんの値が取れるので、銘柄ごとの個別呼び出しは不要
+
+  GET /v1/companies/{code}/ratios
+    - {code} は **edinet_code (E03006)**。証券コードでは not_found になる
+    - **時系列が古い順**で返る。最新期を見るには末尾/最大 fiscal_year を取ること
+    - 値は **小数** (roe 0.1158 = 11.58%)。ランキング側は % なので**単位系が違う**
+
+★ 全銘柄の網羅はできない
+  各ランキングは上位500件（全上場約3,800社の約13%）しか見えない。
+  よって「全条件を満たす銘柄」ではなく「各指標の上位500に同時に入る銘柄」を
+  探している。条件を増やすほど積集合は急速に小さくなる（実測: 3本で5社）。
+  そのため必須条件 (require) は2〜3本に絞り、残りは加点 (score) で扱う設計にした。
 
 使い方:
-  python 01_screen_fundamentals.py --outdir ~/projects/20260802_jpstock/results/01_screen
-  python 01_screen_fundamentals.py --dry-run     # API を叩かず消費見積りだけ出す
+  python 01_screen_fundamentals.py --config criteria/value_rerating.json \\
+    --outdir ~/projects/20260803_jpstock/results/01_screen
+  python 01_screen_fundamentals.py --config criteria/income.json --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import sys
@@ -38,72 +58,51 @@ from urllib.error import HTTPError, URLError
 
 BASE_URL = "https://edinetdb.jp/v1"
 CACHE_DIR = Path(__file__).parent / "cache"
-DAILY_QUOTA = 100  # Free プラン
+DAILY_QUOTA = 100          # Free プラン
+RANKING_MAX_LIMIT = 500    # API 側の上限
 
-# 「高いほど良い」指標のみ rankings で粗絞りに使う。
-# 低いほど良い指標 (PBR/PER/de_ratio) は ranking の並び順仕様に依存させず、
-# 生き残り銘柄の ratios を取ってからローカルで閾値判定する。
-DEFAULT_CRITERIA = {
-    "pool_metrics": ["dividend_yield", "roe", "equity_ratio"],
-    "pool_limit": 300,          # 各 ranking から取る件数
-    "pool_mode": "intersect",   # intersect | union
-    "max_verify": 60,           # ratios を叩く上限 (= API 消費の上限)
-    "thresholds": {
-        # metric: [min, max]  (None は無制限)
-        "roe": [8.0, None],
-        "equity_ratio": [40.0, None],
-        "pbr": [None, 2.0],
-        "per": [None, 25.0],
-        "dividend_yield": [1.5, None],
-        "payout_ratio": [None, 80.0],
-    },
+# ratios エンドポイントは小数、ランキングは % で返す。揃えるための係数。
+RATIO_PCT_FIELDS = {
+    "roe", "roa", "roic", "equity_ratio", "net_margin", "operating_margin",
+    "dividend_yield", "payout_ratio", "doe", "fcf_yield", "earnings_yield",
+    "effective_tax_rate",
 }
 
 
 class Quota:
-    """API 消費数を数えて上限で止める。"""
-
     def __init__(self, limit: int) -> None:
-        self.limit = limit
-        self.used = 0
+        self.limit, self.used = limit, 0
 
-    def spend(self, n: int = 1) -> None:
-        if self.used + n > self.limit:
+    def spend(self) -> None:
+        if self.used + 1 > self.limit:
             raise RuntimeError(
-                f"API 消費上限 {self.limit} に到達 (used={self.used})。"
-                "キャッシュを残したまま明日再実行するか --max-verify を下げてください。"
-            )
-        self.used += n
+                f"API 消費上限 {self.limit} に到達。キャッシュを残したまま翌日再実行してください。")
+        self.used += 1
 
 
 def api_get(path: str, params: dict, api_key: str, quota: Quota) -> dict:
     """GET + ディスクキャッシュ。キャッシュヒット時はクォータを消費しない。"""
     qs = urlencode(sorted(params.items()))
-    key = hashlib.sha256(f"{path}?{qs}".encode()).hexdigest()[:16]
     CACHE_DIR.mkdir(exist_ok=True)
-    cache_file = CACHE_DIR / f"{path.strip('/').replace('/', '_')}_{key}.json"
-
+    cache_file = CACHE_DIR / f"{path.strip('/').replace('/', '_')}_{qs or 'none'}.json"
     if cache_file.exists():
         return json.loads(cache_file.read_text())
 
     quota.spend()
     url = f"{BASE_URL}{path}?{qs}" if qs else f"{BASE_URL}{path}"
     req = Request(url, headers={"X-API-Key": api_key, "Accept": "application/json"})
-
     for attempt in range(4):
         try:
             with urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode())
-            cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+            cache_file.write_text(json.dumps(data, ensure_ascii=False))
             return data
         except HTTPError as e:
-            body = e.read().decode(errors="replace")[:300]
-            if e.code == 429:  # レート制限は待って再試行
-                wait = 2 ** (attempt + 1)
-                print(f"  429 rate limited, {wait}s 待機", file=sys.stderr)
-                time.sleep(wait)
+            body = e.read().decode(errors="replace")[:400]
+            if e.code == 429:
+                time.sleep(2 ** (attempt + 1))
                 continue
-            raise RuntimeError(f"HTTP {e.code} on {path}: {body}") from e
+            return {"error": {"code": f"http_{e.code}", "message": body}}
         except URLError as e:
             if attempt == 3:
                 raise RuntimeError(f"接続失敗 {path}: {e}") from e
@@ -111,84 +110,68 @@ def api_get(path: str, params: dict, api_key: str, quota: Quota) -> dict:
     raise RuntimeError(f"{path}: 再試行上限")
 
 
-def extract_rows(payload) -> list[dict]:
-    """レスポンス形状の揺れを吸収して行リストを返す。"""
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for k in ("data", "items", "results", "rankings", "companies"):
-            v = payload.get(k)
-            if isinstance(v, list):
-                return v
-        # {"data": {"items": [...]}} のような入れ子
-        for v in payload.values():
-            if isinstance(v, dict):
-                nested = extract_rows(v)
-                if nested:
-                    return nested
-    return []
+def metric_path(metric: str) -> str:
+    """equity_ratio / equity-ratio どちらで書かれても API 形式に正規化する。"""
+    return metric.replace("_", "-")
 
 
-def get_code(row: dict) -> str | None:
-    for k in ("code", "ticker", "sec_code", "securities_code", "edinet_code"):
-        v = row.get(k)
-        if v:
-            return str(v).strip()
-    return None
+def fetch_ranking(metric: str, limit: int, api_key: str, quota: Quota) -> list[dict]:
+    limit = min(limit, RANKING_MAX_LIMIT)
+    payload = api_get(f"/rankings/{metric_path(metric)}", {"limit": limit},
+                      api_key, quota)
+    if "error" in payload:
+        msg = payload["error"].get("message", "")
+        print(f"  警告: rankings/{metric_path(metric)} 取得失敗 — {msg[:160]}",
+              file=sys.stderr)
+        return []
+    return payload.get("data", [])
 
 
-def get_name(row: dict) -> str:
-    for k in ("name", "company_name", "filer_name", "name_ja"):
-        v = row.get(k)
-        if v:
-            return str(v).strip()
-    return ""
+def passes(value: float | None, lo, hi) -> bool:
+    if value is None:
+        return False
+    if lo is not None and value < lo:
+        return False
+    if hi is not None and value > hi:
+        return False
+    return True
 
 
-def as_float(v) -> float | None:
-    if v is None or v == "":
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def passes(metrics: dict, thresholds: dict) -> tuple[bool, list[str]]:
-    """閾値判定。値が取れない指標は「判定不能」として除外理由に残す。"""
-    reasons = []
-    for metric, (lo, hi) in thresholds.items():
-        v = as_float(metrics.get(metric))
-        if v is None:
-            reasons.append(f"{metric}=欠損")
-            continue
-        if lo is not None and v < lo:
-            reasons.append(f"{metric}={v:.2f}<{lo}")
-        if hi is not None and v > hi:
-            reasons.append(f"{metric}={v:.2f}>{hi}")
-    return (not reasons, reasons)
+def latest_ratios(payload: dict) -> dict:
+    """ratios の時系列から最新期を取り、% 系を100倍してランキングと単位を揃える。"""
+    rows = payload.get("data") or []
+    if not rows:
+        return {}
+    latest = max(rows, key=lambda r: r.get("fiscal_year") or 0)
+    out = {}
+    for k, v in latest.items():
+        if isinstance(v, (int, float)) and k in RATIO_PCT_FIELDS:
+            out[k] = v * 100
+        else:
+            out[k] = v
+    return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True, help="criteria/*.json")
     ap.add_argument("--outdir", default="results/01_screen")
-    ap.add_argument("--config", help="条件を書いた JSON")
-    ap.add_argument("--max-verify", type=int, help="ratios を叩く上限を上書き")
     ap.add_argument("--quota", type=int, default=DAILY_QUOTA)
-    ap.add_argument("--dry-run", action="store_true", help="API を叩かず消費見積りのみ")
+    ap.add_argument("--limit", type=int, default=RANKING_MAX_LIMIT)
+    ap.add_argument("--enrich", action="store_true",
+                    help="通過銘柄の ratios を追加取得 (1銘柄1req)。連続増配年数などが付く")
+    ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    criteria = dict(DEFAULT_CRITERIA)
-    if args.config:
-        criteria.update(json.loads(Path(args.config).read_text()))
-    if args.max_verify:
-        criteria["max_verify"] = args.max_verify
+    crit = json.loads(Path(args.config).read_text())
+    require: dict = crit.get("require", {})
+    score: dict = crit.get("score", {})
+    metrics = list(require) + [m for m in score if m not in require]
 
-    n_pool = len(criteria["pool_metrics"])
     if args.dry_run:
-        print(f"rankings: {n_pool} req")
-        print(f"ratios  : 最大 {criteria['max_verify']} req")
-        print(f"合計    : 最大 {n_pool + criteria['max_verify']} req / {args.quota}")
+        print(f"rankings: {len(metrics)} req ({', '.join(metric_path(m) for m in metrics)})")
+        print(f"enrich  : 通過銘柄数ぶん (--enrich 指定時のみ)")
+        print(f"合計    : 最低 {len(metrics)} req / {args.quota}")
         return 0
 
     api_key = os.environ.get("EDINETDB_API_KEY")
@@ -202,90 +185,100 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     quota = Quota(args.quota)
 
-    # --- 段階1: rankings で候補プールを作る -------------------------------
-    pools: list[set[str]] = []
-    names: dict[str, str] = {}
-    for metric in criteria["pool_metrics"]:
-        payload = api_get(f"/rankings/{metric}",
-                          {"limit": criteria["pool_limit"]}, api_key, quota)
-        rows = extract_rows(payload)
+    # --- ランキングを集めて銘柄ごとの指標テーブルを作る ---------------------
+    table: dict[str, dict] = {}
+    meta_info: dict[str, dict] = {}
+    for m in metrics:
+        rows = fetch_ranking(m, args.limit, api_key, quota)
         if not rows:
-            print(f"  警告: rankings/{metric} から行を抽出できず。"
-                  f"レスポンス形状を確認: {str(payload)[:200]}", file=sys.stderr)
-        codes = set()
+            continue
+        vals = [r["value"] for r in rows if isinstance(r.get("value"), (int, float))]
+        meta_info[m] = {"n": len(rows), "unit": rows[0].get("unit"),
+                        "best": vals[0] if vals else None,
+                        "worst": vals[-1] if vals else None}
+        print(f"rankings/{metric_path(m):26s} {len(rows):4d}件 "
+              f"{meta_info[m]['best']} → {meta_info[m]['worst']} {meta_info[m]['unit'] or ''}")
         for r in rows:
-            c = get_code(r)
-            if c:
-                codes.add(c)
-                names.setdefault(c, get_name(r))
-        pools.append(codes)
-        print(f"rankings/{metric}: {len(codes)} 社")
+            e = r.get("edinet_code")
+            if not e:
+                continue
+            rec = table.setdefault(e, {
+                "edinet_code": e,
+                "code": str(r.get("sec_code") or "")[:4],  # 4桁に正規化
+                "name": r.get("name_ja") or r.get("name") or "",
+                "industry": r.get("industry") or "",
+            })
+            rec[m] = r["value"]
 
-    if not pools or not any(pools):
-        print("候補プールが空。API レスポンス形状かキーを確認してください。", file=sys.stderr)
+    if not table:
+        print("ランキングを1本も取得できませんでした。", file=sys.stderr)
         return 1
 
-    if criteria["pool_mode"] == "union":
-        pool = set().union(*pools)
-    else:
-        pool = set(pools[0]).intersection(*pools[1:]) if len(pools) > 1 else pools[0]
-    pool_sorted = sorted(pool)
-    print(f"プール ({criteria['pool_mode']}): {len(pool_sorted)} 社")
+    # --- require を全部満たす銘柄だけ残し、score で加点 --------------------
+    survivors = []
+    for e, rec in table.items():
+        if not all(passes(rec.get(m), *require[m]) for m in require):
+            continue
+        pts, hits = 0, []
+        for m, (lo, hi) in score.items():
+            if passes(rec.get(m), lo, hi):
+                pts += 1
+                hits.append(metric_path(m))
+        rec["score"] = pts
+        rec["score_hits"] = ";".join(hits)
+        survivors.append(rec)
 
-    truncated = 0
-    if len(pool_sorted) > criteria["max_verify"]:
-        truncated = len(pool_sorted) - criteria["max_verify"]
-        print(f"  注意: {truncated} 社は API 上限のため未検証のまま切り捨て", file=sys.stderr)
-        pool_sorted = pool_sorted[: criteria["max_verify"]]
+    survivors.sort(key=lambda r: (-r["score"], r.get(metrics[0]) or 0))
 
-    # --- 段階2: 生き残りの ratios を取って閾値判定 ------------------------
-    survivors, rejected = [], []
-    for code in pool_sorted:
-        try:
-            payload = api_get(f"/companies/{code}/ratios", {}, api_key, quota)
-        except RuntimeError as e:
-            print(f"  {code}: {e}", file=sys.stderr)
-            break
-        rows = extract_rows(payload)
-        metrics = rows[0] if rows else (payload if isinstance(payload, dict) else {})
-        if isinstance(metrics.get("data"), dict):
-            metrics = metrics["data"]
+    cols = (["code", "name", "industry", "score", "score_hits", "edinet_code"]
+            + [m for m in metrics])
 
-        ok, reasons = passes(metrics, criteria["thresholds"])
-        rec = {"code": code, "name": names.get(code, get_name(metrics))}
-        rec.update({m: as_float(metrics.get(m)) for m in criteria["thresholds"]})
-        if ok:
-            survivors.append(rec)
-        else:
-            rejected.append({**rec, "reasons": "; ".join(reasons)})
+    # --- 任意: 通過銘柄の ratios を足す ------------------------------------
+    if args.enrich and survivors:
+        extra = ["per", "pbr", "dividend_yield", "payout_ratio", "market_cap",
+                 "consecutive_dividend_increase_years", "is_record_net_income",
+                 "fiscal_year"]
+        for rec in survivors:
+            payload = api_get(f"/companies/{rec['edinet_code']}/ratios", {},
+                              api_key, quota)
+            if "error" in payload:
+                continue
+            latest = latest_ratios(payload)
+            for k in extra:
+                if k in latest:
+                    rec[f"r_{k}"] = latest[k]
+        cols += [f"r_{k}" for k in extra]
 
-    # --- 出力 -------------------------------------------------------------
-    cols = ["code", "name"] + list(criteria["thresholds"])
     csv_path = outdir / f"candidates_{ts}.csv"
     with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
-        w.writerows(sorted(survivors, key=lambda r: -(r.get("dividend_yield") or 0)))
+        w.writerows(survivors)
 
     log = {
         "timestamp": ts,
-        "criteria": criteria,
-        "api_requests_used": quota.used,
-        "pool_size": len(pool),
-        "truncated_by_quota": truncated,
+        "config_file": args.config,
+        "criteria": crit,
+        "ranking_limit": min(args.limit, RANKING_MAX_LIMIT),
+        "ranking_meta": meta_info,
+        "universe_seen": len(table),
         "survivors": len(survivors),
-        "rejected": len(rejected),
-        "rejected_detail": rejected,
+        "api_requests_used": quota.used,
+        "caveats": [
+            "各ランキングは上位500件のみ。全上場約3,800社を網羅していない。",
+            "よって『条件を満たす全銘柄』ではなく『各指標の上位500に同時に入る銘柄』。",
+            "payout-ratio ランキングは配当性向が高い順。低配当性向の抽出には使えない。",
+        ],
     }
     (outdir / f"screen_log_{ts}.json").write_text(
-        json.dumps(log, ensure_ascii=False, indent=2))
+        json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"\n通過 {len(survivors)} 社 / 検証 {len(survivors) + len(rejected)} 社 "
-          f"(API {quota.used} req 消費)")
-    print(f"  {csv_path}")
-    if truncated:
-        print(f"  ※ クォータ上限で {truncated} 社は未検証。翌日再実行すると"
-              f"キャッシュ済みは消費せず続きから進みます。")
+    print(f"\n観測ユニバース {len(table)} 社 → 通過 {len(survivors)} 社 "
+          f"(API {quota.used} req)")
+    for r in survivors[:20]:
+        vals = " ".join(f"{metric_path(m)}={r[m]:g}" for m in metrics if m in r)
+        print(f"  [{r['score']}] {r['code']} {r['name'][:20]:22s} {vals}")
+    print(f"\n  {csv_path}")
     return 0
 
 

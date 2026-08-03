@@ -19,9 +19,10 @@ export EDINETDB_API_KEY="..."   # https://edinetdb.jp/developers で無料発行
 PROJ=~/projects/$(date +%Y%m%d)_jpstock
 mkdir -p $PROJ/results
 
-# 1. 財務で数十社に絞る (EDINET DB を叩く。無料枠 100 req/日)
-python 01_screen_fundamentals.py --dry-run          # まず消費見積り
-python 01_screen_fundamentals.py --outdir $PROJ/results/01_screen
+# 1. 財務で絞る (EDINET DB。ランキング1本=1req なので全体でも7req程度)
+python 01_screen_fundamentals.py --config criteria/value_rerating.json --dry-run
+python 01_screen_fundamentals.py --config criteria/value_rerating.json \
+  --outdir $PROJ/results/01_screen --enrich
 
 # 2. 通過した銘柄の優待を各社IRで確認して yutai_master.csv に記入
 #    (ここは手作業。優待には公式APIが存在しない)
@@ -79,18 +80,47 @@ python 01_screen_fundamentals.py --config criteria/value_rerating.json \
 銘柄群の中央値が TOPIX とほとんど変わらないなら、それは選別が効いていないという
 陰性の結果であって、条件を作り直す根拠になる。
 
-## API 消費について
+## EDINET DB API の実仕様（2026-08 に実データで確認）
 
-EDINET DB 無料枠は **100 req/日**。消費内訳は:
+ドキュメントに書かれていない挙動が複数あったので記録しておく。
 
-- `rankings` を指標ごとに 1 req（既定 3 req）
-- 生き残り 1 社につき `ratios` 1 req（既定上限 60 req）
+| 項目 | 実際 |
+|---|---|
+| ランキングの指標名 | **ハイフン区切り**（`equity-ratio`。`equity_ratio` は `invalid_metric`） |
+| ランキングの件数上限 | **500件**。`limit=5000` でも500で頭打ち |
+| ランキングの並び | 指標ごとに「良い順」。ただし定義は API 側 |
+| `/companies/{code}` の code | **edinet_code (E03006)**。証券コードでは `not_found` |
+| `ratios` の返り | **時系列（古い順）**。最新期は末尾／最大 `fiscal_year` |
+| `ratios` の単位 | **小数**（`roe: 0.1158` = 11.58%）。ランキング側は % で**単位系が違う** |
+| `sec_code` | **5桁**（`30760` = 3076 + 0）。4桁に正規化して使う |
+
+### ランキングの並び順の罠
+
+```
+pbr              → 低い順 (0.195 → 0.595)
+roe              → 高い順 (92.2% → 18.5%)
+shares-change-5y → 減少幅が大きい順 (-99.8% → -6.2%)   ← 自社株買いの検出に使える
+payout-ratio     → 高い順 (200% → 60.6%)               ← 低配当性向は取れない
+```
+
+`payout-ratio` が高い順なのが厄介で、「増配余地のある低配当性向の会社」を
+ランキングから直接引くことはできない。`--enrich` で通過銘柄の `ratios` を
+取れば実際の配当性向が付くので、そこで確認する運用にしてある。
+
+### 全銘柄は網羅できない
+
+各ランキングは上位500件（全上場約3,800社の約13%）しか見えない。よってこれは
+「条件を満たす全銘柄」ではなく「各指標の上位500に同時に入る銘柄」を探している。
+条件を増やすと積集合は急速に縮む（実測: 3本で5社）。だから **必須条件 (`require`)
+は2〜3本に絞り、残りは加点 (`score`) で扱う**設計にした。
+
+### API 消費
+
+無料枠 **100 req/日**。ランキング1本＝1req なので、条件7本でも **7req** で済む。
+`--enrich` を付けると通過銘柄1社につき1req 追加。
 
 レスポンスは `cache/` に保存され、**再実行時は消費しない**。条件を変えて
-試行錯誤しても、同じ銘柄を再取得する分にはクォータを食わない。
-クォータ上限に当たった場合は途中まで書き出して終了し、翌日再実行すれば
-キャッシュ済みを飛ばして続きから進む。
-
+試行錯誤しても、同じランキングを引き直す分にはクォータを食わない。
 `cache/` は `.gitignore` 済み。消すと消費し直しになる。
 
 ## 優待の扱い
