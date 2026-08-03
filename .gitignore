@@ -6,3 +6,6 @@
 scripts/jp-stock/cache/
 scripts/jp-stock/prices.csv
 scripts/jp-stock/my_criteria.json
+
+__pycache__/
+*.pyc
