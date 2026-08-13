@@ -66,6 +66,12 @@ archive/
 
 ## 自作ツール
 
+### ★R tAge パッケージ版数（2026-08-14 記録、消さない）
+- 2026-08-14 より前の R tAge 解析は旧版 0.1.0（予測を誤らせるバグ2件持ち）で実行されていた。
+  詳細: `/mnt/nas/database/tage_models/README_VERSION_WARNING.md`
+- 現在の共通 env `tage` は 1.1.0（修正済み・公式メタセル `aggregate_pseudobulk` 系同梱）。
+  0.1.0 はアーカイブ保管のみ（`/mnt/nas/database/tage_package_archive/`）、library path から到達不能。
+
 ### gse2tage (~/tools/gse2tage/)
 GEO accession → tAge自動パイプライン。`gse2tage GSE123456 --species mouse` で全モデル実行。
 詳細: `~/tools/gse2tage/README.md`
