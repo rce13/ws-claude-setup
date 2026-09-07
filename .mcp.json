@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "edinetdb": {
+      "type": "http",
+      "url": "https://edinetdb.jp/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EDINETDB_API_KEY}"
+      }
+    },
+    "jquants": {
+      "type": "stdio",
+      "command": "jquants-mcp",
+      "args": [],
+      "env": {
+        "JQUANTS_API_KEY": "${JQUANTS_API_KEY}"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "インカム重視: 今すでに配当利回りが高く、財務が健全な会社を拾う。",
+    "上位500の境界は dividend-yield 4.24%、health-score 93点、equity-ratio 78.4%。",
+    "",
+    "値動きは相対的に小さくなる方向のフィルタなので、半年での値上がりは期待しにくい。",
+    "『半年で+10%』が目的なら value_rerating.json のほうを使うこと。",
+    "配当利回り4%台は年間の数字で、半年なら2%強にしかならない。",
+    "",
+    "注意: payout-ratio ランキングは配当性向が高い順に返る。",
+    "『無理して配っていないか』の確認には使えないので、",
+    "持続性の確認は health-score と equity-ratio で代替している。"
+  ],
+  "require": {
+    "dividend-yield": [4.2, null],
+    "equity-ratio": [78.0, null]
+  },
+  "score": {
+    "health-score": [93.0, null],
+    "pbr": [null, 0.6],
+    "roe": [18.0, null],
+    "shares-change-5y": [null, -6.0]
+  }
+}
