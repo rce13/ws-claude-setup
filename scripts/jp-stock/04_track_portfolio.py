@@ -194,8 +194,27 @@ def main() -> int:
         lc = last_close(rows, args.asof)
         shares = float(p["shares"])
         entry = float(p["entry_price"])
-        cost = shares * entry
+        cost = shares * entry          # 取得原価は名目のまま（実際に払った円）
         total_cost += cost
+
+        # --- 株式分割の遡及調整への対応 -----------------------------------
+        # J-Quants は分割が起きると AdjC を過去まで遡って書き換える。
+        # 例: 佐藤食品工業(2814)は 2026-06 に 1:2 分割し、建値日 2026-05-11 の
+        #     AdjC が 3050 → 1525 に書き換わった。建値（分割前の名目）と
+        #     現値（分割後の調整済み）を直接比べると -50% の偽の損失になる。
+        # 建値日の調整後株価を「今の」データから引き直し、その比率で株数を換算する。
+        # 実際の証券口座で株数が倍になるのと同じ扱い。
+        split = 1.0
+        eb = last_close(rows, p["entry_date"])
+        if eb and eb[1] > 0:
+            ratio = entry / eb[1]
+            if abs(ratio - 1.0) > 0.02:   # 2%超のずれは分割等と判断
+                split = ratio
+                notes.append(
+                    f"{p['code']} {p['name']}: 株式分割を検出 (1:{split:g})。"
+                    f"建値日の調整後株価 {eb[1]:g}円 / 建値 {entry:g}円。"
+                    f"保有 {shares:g}株 → {shares * split:g}株 として評価")
+        shares_eff = shares * split
         if not lc:
             rows_out.append({**p, "asof": "-", "price": "", "value": "",
                              "pl_yen": "", "pl_pct": "", "note": "価格取得できず"})
@@ -203,13 +222,13 @@ def main() -> int:
             continue
         d, price = lc
         asof_seen.append(d)
-        value = shares * price
+        value = shares_eff * price
         total_value += value
         rows_out.append({
-            "code": p["code"], "name": p["name"], "shares": int(shares),
-            "entry_price": entry, "asof": d, "price": price,
+            "code": p["code"], "name": p["name"], "shares": int(shares_eff),
+            "entry_price": round(entry / split, 1), "asof": d, "price": price,
             "value": round(value), "pl_yen": round(value - cost),
-            "pl_pct": round((price / entry - 1) * 100, 2), "note": "",
+            "pl_pct": round((value / cost - 1) * 100, 2), "note": "",
         })
 
     asof = args.asof or (max(asof_seen) if asof_seen else "-")
