@@ -5,6 +5,9 @@ ktomo-ws (研究用ワークステーション) での Claude Code 設定ファ�
 ## ファイル
 - `CLAUDE.md` — グローバルルール（出力規則、図作成ルール、Agent活用、容量管理等）
 - `settings.json` — hooks、プラグイン、環境変数の設定
+- `.mcp.json` — MCPサーバ定義（EDINET DB / J-Quants）
+- `docs/jp-stock-data-sources.md` — 日本株データ源の比較とセットアップ
+- `scripts/jp-stock/` — 日本株スクリーニング（優待込み総合利回り）パイプライン
 
 ## 主な設定内容
 - セッション終了時のラボノート自動生成（Stop hook + CLAUDE.md指示）
