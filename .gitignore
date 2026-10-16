@@ -1,3 +1,11 @@
 *.bak
 .DS_Store
 .env
+
+# jp-stock: API レスポンスキャッシュ・ローカルの株価/条件ファイル
+scripts/jp-stock/cache/
+scripts/jp-stock/prices.csv
+scripts/jp-stock/my_criteria.json
+
+__pycache__/
+*.pyc
